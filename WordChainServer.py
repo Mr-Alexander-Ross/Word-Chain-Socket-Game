@@ -2,6 +2,7 @@
 # Version 1.0 Basic 2-player word chain game
 # Author: Alexander, Brandon, Jorie
 # Date: 10/9/2025
+# Updated: 10/15/2025 - Updated to handle timer expiration from clients
 
 
 
@@ -31,6 +32,12 @@ def word_chain_thread(player1, player2, dictionary):
         # Ask current player for a word
         current_player.send("Your turn. Enter a word:\n".encode())
         word = current_player.recv(1024).decode().strip().lower()
+        
+        if word == "timerexpired":
+            # Handle timer expiration
+            current_player.send("Time expired!\n".encode())
+            other_player.send("Opponent's time expired!\n".encode())
+            break
 
         # Check if word is valid using PyEnchant
         if not dictionary.check(word):
