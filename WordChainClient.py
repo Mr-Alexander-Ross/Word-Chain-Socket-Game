@@ -112,127 +112,48 @@ def client_main():
     recv_thread = threading.Thread(target=socket_receiver, args=(clientSocket, message_queue), daemon=True)
     recv_thread.start()
 
-    # Command input queue and thread: allows user to type lobby commands while
-    # the receiver thread prints incoming server messages.
-    command_queue = queue.Queue()
+    while True:
+        # Wait for the next message from the server (placed by receiver thread)
+        message = message_queue.get()
+        if message is None:
+            break
+        clear_screen()
+        print(message)
+        if "Your turn" in message:
+            # Start a simple countdown timer in a daemon thread. If the timer reaches
+            # `timeout` seconds before the player enters a word, the thread will send
+            # a TimerExpired message to the server.
+            timeout_seconds = 10
+            response_sent_event = threading.Event()
 
-    def input_reader(cmd_queue):
-        """Read lines from stdin and put them in the command queue."""
-        while True:
+            # Reserve a status line above the prompt for the timer, then print
+            # the prompt on its own line so the timer can update the status line
+            # without creating many extra lines.
+            print()  # blank line reserved for timer status
+            sys.stdout.write("Enter your word: ")
+            sys.stdout.flush()
+
+            timer_thread = threading.Thread(target=countdown_timer, args=(clientSocket, response_sent_event, timeout_seconds), daemon=True)
+            timer_thread.start()
+
+            # Blocking input; if entered before timeout, send word and set the event so
+            # the timer thread doesn't send the timeout message.
             try:
-                line = input()
+                word = input()
             except (EOFError, KeyboardInterrupt):
-                # Propagate a quit command so main loop can exit cleanly
-                cmd_queue.put('quit')
-                return
-            cmd_queue.put(line)
+                word = ''
 
-    input_thread = threading.Thread(target=input_reader, args=(command_queue,), daemon=True)
-    input_thread.start()
+            if not response_sent_event.is_set():
+                # Checks if the timer has already expired
+                clientSocket.send(word.encode())
+                response_sent_event.set()
+                # Sets the event to stop the timer thread
+            else:
+                # Timer already expired; ignore late input
+                print("Input ignored because time already expired.")
+        elif "Game over" in message or not message:
+            break
 
-    # Client state: 'lobby' or 'game'
-    mode = 'lobby'
-    print("Type 'help' for available commands. In lobby mode you can: list, create <lobby> <name>, join <lobby> <name>, leave <lobby> <name>, quit")
+    clientSocket.close()
 
-    try:
-        while True:
-            # Prefer handling server messages first so state changes (like START_GAME)
-            # are acted upon immediately. We use short timeouts to allow responsive
-            # handling of both queues without busy-waiting.
-            try:
-                message = message_queue.get(timeout=0.1)
-            except queue.Empty:
-                message = None
-
-            if message:
-                clear_screen()
-                print(message)
-                # If server tells us a game is starting, switch to game mode.
-                if message.strip().startswith('START_GAME'):
-                    mode = 'game'
-                    print('Game starting — switching to game mode.')
-                    # Continue loop; in-game prompts are triggered by server 'Your turn'
-                elif 'Your turn' in message and mode == 'game':
-                    # Start turn flow (existing logic)
-                    timeout_seconds = 10
-                    response_sent_event = threading.Event()
-
-                    # Reserve a status line above the prompt for the timer
-                    print()  # blank line reserved for timer status
-                    sys.stdout.write('Enter a word: ')
-                    sys.stdout.flush()
-
-                    timer_thread = threading.Thread(target=countdown_timer, args=(clientSocket, response_sent_event, timeout_seconds), daemon=True)
-                    timer_thread.start()
-
-                    # Wait for the player's input from the command queue. This uses
-                    # blocking get so the main thread can still be responsive to other
-                    # short events (like timer setting the event).
-                    try:
-                        # If input_reader places lines in queue, get the next one as the word.
-                        word = command_queue.get()
-                    except Exception:
-                        word = ''
-
-                    if not response_sent_event.is_set():
-                        clientSocket.send(word.encode())
-                        response_sent_event.set()
-                    else:
-                        print('Input ignored because time already expired.')
-                elif 'Game over' in message:
-                    print('Server indicated game over. Exiting.')
-                    break
-
-            # Handle user-typed commands when in lobby mode (or general commands)
-            try:
-                cmd = command_queue.get_nowait()
-            except queue.Empty:
-                cmd = None
-
-            if cmd:
-                cmd = cmd.strip()
-                if cmd.lower() == 'quit':
-                    print('Quitting client.')
-                    break
-                if cmd.lower() == 'help':
-                    print("Commands:\n  list\n  create <lobby> <your_name>\n  join <lobby> <your_name>\n  leave <lobby> <your_name>\n  quit")
-                    continue
-
-                # If we're in game mode, player input during a turn is handled above
-                if mode == 'game':
-                    # If user types during the game outside of a 'Your turn' prompt,
-                    # just send the raw line to the server (some server messages are free-form)
-                    clientSocket.send(cmd.encode())
-                    continue
-
-                # Lobby mode commands parsing
-                parts = cmd.split()
-                if not parts:
-                    continue
-                verb = parts[0].lower()
-                if verb == 'list':
-                    clientSocket.send('LIST_LOBBIES'.encode())
-                elif verb == 'create' and len(parts) >= 3:
-                    lobby_name = parts[1]
-                    player_name = ' '.join(parts[2:])
-                    clientSocket.send(f'CREATE_LOBBY {lobby_name} {player_name}'.encode())
-                elif verb == 'join' and len(parts) >= 3:
-                    lobby_name = parts[1]
-                    player_name = ' '.join(parts[2:])
-                    clientSocket.send(f'JOIN_LOBBY {lobby_name} {player_name}'.encode())
-                elif verb == 'leave' and len(parts) >= 3:
-                    lobby_name = parts[1]
-                    player_name = ' '.join(parts[2:])
-                    clientSocket.send(f'LEAVE_LOBBY {lobby_name} {player_name}'.encode())
-                else:
-                    print("Unknown command in lobby mode. Type 'help' for commands.")
-
-    finally:
-        try:
-            clientSocket.close()
-        except Exception:
-            pass
-
-
-if __name__ == '__main__':
-    client_main()
+client_main()
