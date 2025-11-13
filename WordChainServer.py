@@ -30,7 +30,7 @@ def word_chain_thread(player1, player2, dictionary):
 
     while True:
         # Ask current player for a word
-        current_player.send("Your turn. Enter a word:\n".encode())
+        current_player.send("Your turn.\n".encode())
         word = current_player.recv(1024).decode().strip().lower()
         
         if word == "timerexpired":
@@ -38,13 +38,12 @@ def word_chain_thread(player1, player2, dictionary):
             current_player.send("Time expired!\n".encode())
             other_player.send("Opponent's time expired!\n".encode())
             break
-
         # Check if word is valid using PyEnchant
         if not dictionary.check(word):
-            current_player.send("Invalid word. Try again:\n".encode())
-            continue
+            current_player.send(f"{word} is an Invalid word.\n".encode())
+            break
         if word in used_words:
-            current_player.send("Word already used.\n".encode())
+            current_player.send(f"{word} already used.\n".encode())
             break
         if last_letter and word[0] != last_letter:
             current_player.send(f"Word must start with '{last_letter}'.\n".encode())
@@ -54,7 +53,7 @@ def word_chain_thread(player1, player2, dictionary):
         used_words.append(word)
         last_letter = word[-1]
         current_player.send(f"Accepted!\n".encode())
-        other_player.send(f"Player used '{word}'. Your turn next!\n".encode())
+        other_player.send(f"Player used '{word}'.\n".encode())
 
         # Swap players
         current_player, other_player = other_player, current_player
