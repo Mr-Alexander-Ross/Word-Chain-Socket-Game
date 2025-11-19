@@ -151,6 +151,12 @@ def client_main():
             else:
                 # Timer already expired; ignore late input
                 print("Input ignored because time already expired.")
+        elif "Enter Your Name" in message:
+            try:
+                word = input()
+            except (EOFError, KeyboardInterrupt):
+                word = ''
+            clientSocket.send(word.encode())
         elif "Game over" in message or not message:
             break
 
