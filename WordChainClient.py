@@ -3,6 +3,10 @@
 # Author: Alexander, Brandon, Jorie
 # Date: 10/9/2025
 # Updated: 10/15/2025 - Added countdown timer for player turns
+# Updated: 10/20/2025 - Added rematch prompt with timeout
+#                     - Added input timeout handling for rematch prompt
+#                     - Improved terminal output formatting
+#                     - Refactored input with timeout to use threading for better UX
 
 from socket import *
 import os
@@ -15,6 +19,59 @@ def clear_screen():
     # Clear the terminal screen (Windows/Unix)
     os.system("cls" if os.name == "nt" else "clear")
 
+def input_with_timeout(prompt, timeout_seconds):
+    """Prompt the user and wait up to `timeout_seconds` for input.
+    Returns the string response (stripped) or None on timeout.
+    This uses a background thread to perform blocking input() so we can
+    update a per-second countdown in the main thread.
+    """
+    q = queue.Queue()
+
+    def reader(queue_):
+        try:
+            line = input()
+        except Exception:
+            line = ''
+        queue_.put(line)
+
+    # Print the prompt (caller usually already wrote it) but ensure flush
+    sys.stdout.flush()
+
+    t = threading.Thread(target=reader, args=(q,), daemon=True)
+    t.start()
+
+    # Per-second countdown display above the prompt
+    for remaining in range(timeout_seconds, 0, -1):
+        try:
+            # Try to get input with 1s granularity so we can update the countdown
+            line = q.get(timeout=1)
+            # Clear status line before returning so no countdown text lingers
+            try:
+                clear_status_line()
+            except Exception:
+                pass
+            return line.strip()
+        except queue.Empty:
+            # Update status line showing remaining seconds
+            try:
+                sys.stdout.write('\x1b[s')
+                sys.stdout.write('\x1b[1A')
+                sys.stdout.write('\x1b[1G')
+                sys.stdout.write('\x1b[2K')
+                sys.stdout.write(f"Rematch answer required: {remaining-1:2d}s")
+                sys.stdout.write('\x1b[u')
+                sys.stdout.flush()
+            except Exception:
+                # fallback: print a short line
+                print(f"Rematch answer required: {remaining-1:2d}s")
+            continue
+
+    # timed out - clear status line before returning
+    try:
+        clear_status_line()
+    except Exception:
+        pass
+    return None
 
 def clear_status_line():
     """Clear the reserved timer/status line above the prompt using ANSI if
@@ -29,7 +86,6 @@ def clear_status_line():
     except Exception:
         # fallback: print a blank line (may not remove the old text)
         print()
-
 
 def countdown_timer(client_socket, response_event, timeout_seconds):
     """Countdown timer that sends 'TimerExpired' to the server socket if
@@ -96,68 +152,118 @@ def client_main():
     message_queue = queue.Queue()
 
     def socket_receiver(sock, msg_queue):
+        # Receiver only handles networking: receive data and enqueue messages.
+        # The main loop is responsible for all terminal output (printing).
         while True:
             data = sock.recv(1024)
             if not data:
-                print("\nConnection closed by server.")
-                os._exit(0)
+                # Socket closed by server. Put a sentinel so the main loop
+                # can process any remaining queued messages (e.g. final
+                # "Thanks for playing" text) and then exit cleanly.
+                try:
+                    msg_queue.put(None)
+                except Exception:
+                    pass
+                return
             text = data.decode()
-            # Print immediately so messages show even if main thread is blocked on input
-            print("\n" + text)
             msg_queue.put(text)
-            if "Game over" in text:
-                sock.close()
-                os._exit(0)
 
     recv_thread = threading.Thread(target=socket_receiver, args=(clientSocket, message_queue), daemon=True)
     recv_thread.start()
-
+    clear_screen()
+    print("Connected to Word Chain server. Awaiting Game Start...")
     while True:
         # Wait for the next message from the server (placed by receiver thread)
         message = message_queue.get()
         if message is None:
             break
-        clear_screen()
+        # Clear screen when a new game starts or a word is accepted so the
+        # player sees a clean prompt. Keep other messages visible for context.
+        if ("Accepted" in message) or ("Invalid word" in message) or ("Player used" in message) or  ("Game start" in message) or ("Starting new game" in message):
+            clear_screen()
         print(message)
         if "Your turn" in message:
-            # Start a simple countdown timer in a daemon thread. If the timer reaches
-            # `timeout` seconds before the player enters a word, the thread will send
-            # a TimerExpired message to the server.
+            # Use input_with_timeout for turn input so timeout handling and the
+            # per-second countdown are centralized in one helper.
             timeout_seconds = 10
-            response_sent_event = threading.Event()
 
-            # Reserve a status line above the prompt for the timer, then print
-            # the prompt on its own line so the timer can update the status line
-            # without creating many extra lines.
-            print()  # blank line reserved for timer status
+            # Reserve a status line and show prompt
+            print()  # blank line reserved for timer/status
             sys.stdout.write("Enter your word: ")
             sys.stdout.flush()
 
-            timer_thread = threading.Thread(target=countdown_timer, args=(clientSocket, response_sent_event, timeout_seconds), daemon=True)
-            timer_thread.start()
+            # Get input with timeout. input_with_timeout returns the string or
+            # None on timeout.
+            word = input_with_timeout("", timeout_seconds)
 
-            # Blocking input; if entered before timeout, send word and set the event so
-            # the timer thread doesn't send the timeout message.
-            try:
-                word = input()
-            except (EOFError, KeyboardInterrupt):
-                word = ''
-
-            if not response_sent_event.is_set():
-                # Checks if the timer has already expired
-                clientSocket.send(word.encode())
-                response_sent_event.set()
-                # Sets the event to stop the timer thread
+            if word is None:
+                # Timed out
+                print("\nTime expired! Sending timer expired to server.")
+                try:
+                    clientSocket.send("TimerExpired".encode())
+                except Exception:
+                    pass
             else:
-                # Timer already expired; ignore late input
-                print("Input ignored because time already expired.")
-        elif "Enter Your Name" in message:
+                word = word.strip()
+                if word == "":
+                    # Player intentionally (or accidentally) sent an empty word.
+                    # Send a newline so the server receives bytes that decode
+                    # to an empty string (server handles empty submissions).
+                    try:
+                        clientSocket.send("\n".encode())
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        clientSocket.send(word.encode())
+                    except Exception:
+                        pass
+        elif "Rematch?" in message:
+            # Handle rematch prompt (no timer for this prompt, user has more time)
+            #print()  # blank line
+            #print(message)
+            sys.stdout.write("Enter your response (yes/no): ")
+            sys.stdout.flush()
+
+            # Give the user a limited time to answer the rematch prompt. If
+            # they don't answer in time we send 'no' and exit the client.
+            rematch_timeout = 15
+            answer = input_with_timeout("", rematch_timeout)
+            if answer is None:
+                print("\nNo rematch response entered in time. Sending 'no' and exiting.")
+                try:
+                    clientSocket.send("no".encode())
+                except Exception:
+                    pass
+                try:
+                    clientSocket.close()
+                except Exception:
+                    pass
+                # Exit the client application
+                return
+
+            response = answer.strip().lower()
+            if response == '':
+                response = 'no'
+
             try:
-                word = input()
+                clientSocket.send(response.encode())
+            except Exception:
+                pass
+            print(f"Sent rematch response: {response}")
+        elif "Please enter your name for the record" in message:
+            # Server is asking for player name to store in records
+            # Message is already printed by the main loop, just get input
+            try:
+                name = input()
             except (EOFError, KeyboardInterrupt):
-                word = ''
-            clientSocket.send(word.encode())
-        elif "Game over" in message or not message:
+                name = "Anonymous"
+            try:
+                clientSocket.send(name.encode())
+            except Exception:
+                pass
+        elif "Thanks for playing" in message or not message:
+            print("Game session ended.")
             break
 
     clientSocket.close()
