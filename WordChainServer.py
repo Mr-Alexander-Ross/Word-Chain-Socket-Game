@@ -17,8 +17,9 @@ def load_dictionary():
     # Use PyEnchant English dictionary
     return enchant.Dict("en_US")
 
-#Store Game records in WordChainRecords.txt. 
+
 def store_record(winner : str,loser : str,round_num : int):
+    #Store Game records in WordChainRecords.txt. 
     file = open("WordChainRecords.txt","a+")
     file.close()
     with open("WordChainRecords.txt","r+") as f:
@@ -66,6 +67,16 @@ def store_record(winner : str,loser : str,round_num : int):
     #write edited file to document
     with open("WordChainRecords.txt","w+") as f:
         f.writelines(new_document)
+
+def print_top_5():
+    with open("WordChainRecords.txt") as f:
+        document = f.readlines()
+        # Sorts document by # of rounds
+        sorted_document = sorted(document, key=lambda x: int(x.split(',')[3]),reverse=True)
+        
+        print('Top 5:')
+        for entry in sorted_document[:5]:
+            print(entry,end='')
 
 
 def word_chain_thread(player1, player2, dictionary):
