@@ -94,7 +94,7 @@ def word_chain_thread(player1, player2, dictionary):
         # Inner game loop (existing logic)
         while True:
             round_num += 1  # Increment round counter for each turn
-            current_player.send("Your turn.\n".encode())
+            current_player.send(("Round " + str(round_num) + ". Your turn.\n").encode())
             try:
                 data = current_player.recv(1024)
                 if not data:
@@ -140,7 +140,6 @@ def word_chain_thread(player1, player2, dictionary):
 
             # Swap players
             current_player, other_player = other_player, current_player
-            current_is_p1 = not current_is_p1
 
         # Game over - determine winner
         cp_message += "\nGame over! You lost.\n"
