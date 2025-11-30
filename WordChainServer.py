@@ -68,15 +68,15 @@ def store_record(winner : str,loser : str,round_num : int):
     with open("WordChainRecords.txt","w+") as f:
         f.writelines(new_document)
 
-def print_top_5():
+def get_top_5():
     with open("WordChainRecords.txt") as f:
         document = f.readlines()
         # Sorts document by # of rounds
         sorted_document = sorted(document, key=lambda x: int(x.split(',')[3]),reverse=True)
-        
-        print('Top 5:')
-        for entry in sorted_document[:5]:
-            print(entry,end='')
+        output = 'High Scores: \n'
+        for i,entry in enumerate(sorted_document[:5]):
+            output += f'{i+1}. {entry.split(',')[0]} \t Score:{entry.split(',')[3]}'
+        return output
 
 
 def word_chain_thread(player1, player2, dictionary):
@@ -236,12 +236,13 @@ def word_chain_thread(player1, player2, dictionary):
             store_record(winner_name, loser_name, round_num // 2)
 
             # Now send goodbye messages
+            goodbyeMessage = "Thanks for playing!\n" + get_top_5()
             try:
-                current_player.send("Thanks for playing!\n".encode())
+                current_player.send(goodbyeMessage.encode())
             except Exception:
                 pass
             try:
-                other_player.send("Thanks for playing!\n".encode())
+                other_player.send(goodbyeMessage.encode())
             except Exception:
                 pass
 
