@@ -1,12 +1,15 @@
 # Word Chain Game Client
-# Version 1.0 Basic 2-player word chain game
+# Version 1.6 Basic 2-player word chain game
 # Author: Alexander, Brandon, Jorie
-# Date: 10/9/2025
-# Updated: 10/15/2025 - Added countdown timer for player turns
-# Updated: 10/20/2025 - Added rematch prompt with timeout
+# Date: 10/9/2025     - Initial Version 1.0
+# Updated: 11/05/2025 - Added countdown timer for player turns
+# Updated: 11/19/2025 - Added Score Tracking through WordChainRecords.txt
+# Updated: 11/20/2025 - Added rematch prompt with timeout
 #                     - Added input timeout handling for rematch prompt
 #                     - Improved terminal output formatting
 #                     - Refactored input with timeout to use threading for better UX
+# UpdatedL 11/30/2025 - Added high scores display after game over
+# Updated: 11/30/2025 - Added ASCII Art throughout the client
 
 from socket import *
 import os
@@ -14,6 +17,33 @@ import threading
 import time
 import sys
 import queue
+
+def ascii_title():
+    print(r"""+o==o--o==o--o==o--o==o--o==o--o==o==o+
+||          WORD CHAIN GAME          ||
++o==o--o==o--o==o--o==o--o==o--o==o==o+""")
+
+def round_count(n: int) -> str:
+    return f"[& Round {n} &]"
+
+def your_turn_count(n: int) -> str:
+    return f"[Turn {n}]"
+    
+def banner_win():
+    print(r"""+------------------------------+
+|   GAME OVER! YOU WIN!       |
+|            \o/              |
+|             |    🏆         |
+|            / \              |
++------------------------------+""")
+
+def banner_lose():
+    print(r"""+------------------------------+
+|   GAME OVER! YOU LOSE!      |
+|           x_x               |
+|           /|\      💀       |
+|           / \               |
++------------------------------+""")
 
 def clear_screen():
     # Clear the terminal screen (Windows/Unix)
@@ -171,7 +201,11 @@ def client_main():
     recv_thread = threading.Thread(target=socket_receiver, args=(clientSocket, message_queue), daemon=True)
     recv_thread.start()
     clear_screen()
+    ascii_title()
     print("Connected to Word Chain server. Awaiting Game Start...")
+    current_round = 1
+    current_turn = 1
+    my_count = 1
     while True:
         # Wait for the next message from the server (placed by receiver thread)
         message = message_queue.get()
@@ -181,14 +215,51 @@ def client_main():
         # player sees a clean prompt. Keep other messages visible for context.
         if ("Accepted" in message) or ("Invalid word" in message) or ("Player used" in message) or  ("Game start" in message) or ("Starting new game" in message):
             clear_screen()
-        print(message)
+
+        for line in message.splitlines():
+            if line.strip().startswith("Your turn"):
+                continue
+            if line.startswith("Round "):
+                try:
+                    current_round = int(line.split()[1])
+                except Exception:
+                    current_round = max(1, current_round)
+                my_count = 1
+                continue
+
+            if line.startswith("Turn "):
+                try:
+                    current_turn = int(line.split()[1])
+                except Exception:
+                    current_turn = max(0, current_turn)
+                continue
+
+            if line.startswith("Accepted"):
+                my_count += 1
+
+            if "Game over! You won!" in line:
+                banner_win()
+                continue
+
+            if "Game over! You lost." in line:
+                banner_lose()
+                continue
+
+            print(line)
         if "Your turn" in message:
             # Use input_with_timeout for turn input so timeout handling and the
             # per-second countdown are centralized in one helper.
+
             timeout_seconds = 10
 
             # Reserve a status line and show prompt
             print()  # blank line reserved for timer/status
+            print(round_count(current_round))
+            print(your_turn_count(my_count))
+            print("+--------------------+")
+            print("|  >> YOUR TURN <<   |")
+            print("+--------------------+")
+            print()
             sys.stdout.write("Enter your word: ")
             sys.stdout.flush()
 

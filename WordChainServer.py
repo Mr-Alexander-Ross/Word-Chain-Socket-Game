@@ -1,12 +1,15 @@
 # Word Chain Game Server
-# Version 1.0 Basic 2-player word chain game
+# Version 1.6 Basic 2-player word chain game
 # Author: Alexander, Brandon, Jorie
-# Date: 10/9/2025
-# Updated: 10/15/2025 - Updated to handle timer expiration from clients
-# Updated: 10/20/2025 - Added rematch prompt with timeout
+# Date: 10/9/2025     - Initial version 1.0
+# Updated: 11/05/2025 - Added countdown timer for player turns
+# Updated: 11/19/2025 - Added Score Tracking through WordChainRecords.txt
+# Updated: 11/20/2025 - Added rematch prompt with timeout
 #                     - Added input timeout handling for rematch prompt
-
-
+#                     - Improved terminal output formatting
+#                     - Refactored input with timeout to use threading for better UX
+# UpdatedL 11/30/2025 - Added high scores display after game over
+# Updated: 11/30/2025 - Added ASCII Art throughout the client
 
 from socket import *
 from _thread import *
@@ -85,6 +88,7 @@ def word_chain_thread(player1, player2, dictionary):
     player2.settimeout(15)
 
     play_again = True
+    round_num = 0  # Initialize round counter for games
     while play_again:  # Outer loop for multiple games
         # Reset game state for each new game
         used_words = []
@@ -94,7 +98,7 @@ def word_chain_thread(player1, player2, dictionary):
         last_letter = None
         cp_message = ""
         op_message = ""
-        round_num = 0  # Initialize round counter for this game
+        turn_num = 0  # Initialize turn counter for this game
 
         # Start the game
         player1.send("Welcome to Word Chain! You are Player 1.\n".encode())
@@ -102,10 +106,13 @@ def word_chain_thread(player1, player2, dictionary):
         player1.send("Game starts! Please enter the first word:\n".encode())
         player2.send("Waiting for Player 1 to start...\n".encode())
 
+        round_num += 1  # Increment round number for each new game
+        player1.send(f"Round {round_num}\n".encode())
+        player2.send(f"Round {round_num}\n".encode())
+
         # Inner game loop (existing logic)
         while True:
-            round_num += 1  # Increment round counter for each turn
-            current_player.send(("Round " + str(round_num) + ". Your turn.\n").encode())
+            current_player.send("Your turn.\n".encode())
             try:
                 data = current_player.recv(1024)
                 if not data:
@@ -147,10 +154,15 @@ def word_chain_thread(player1, player2, dictionary):
             last_letter = word[-1]
             current_player.send(f"Accepted!\n".encode())
             other_player.send(f"Player used '{word}'.\n".encode())
+
             #INSERT ROUND COUNTER HERE
+            turn_num += 1
+            player1.send(f"Turn {turn_num}\n".encode())
+            player2.send(f"Turn {turn_num}\n".encode())
 
             # Swap players
             current_player, other_player = other_player, current_player
+            current_is_p1 = not current_is_p1
 
         # Game over - determine winner
         cp_message += "\nGame over! You lost.\n"
@@ -233,7 +245,7 @@ def word_chain_thread(player1, player2, dictionary):
                 winner_name = "Unknown"
 
             # Store the game record
-            store_record(winner_name, loser_name, round_num // 2)
+            store_record(winner_name, loser_name, turn_num // 2)
 
             # Now send goodbye messages
             goodbyeMessage = "Thanks for playing!\n" + get_top_5()
